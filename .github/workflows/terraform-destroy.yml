@@ -1,0 +1,87 @@
+name: Terraform Destroy (Rollback)
+
+on:
+  push:
+    branches:
+      - 'rollback/**'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES to confirm destroy'
+        required: true
+        default: 'NO'
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_ROOT: .
+  ARM_USE_OIDC: true
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  # Подай нужните TF_VAR_* (или използвай tfvars във репото)
+  TF_VAR_allow_rg_destroy: "true"
+  # Примерни входове – адаптирай за твоя проект:
+  TF_VAR_location: northeurope
+  TF_VAR_name_prefix: demo
+  TF_VAR_hub_address_space: '["10.10.0.0/16"]'
+  TF_VAR_spoke1_address_space: '["10.20.0.0/16"]'
+  TF_VAR_spoke2_address_space: '["10.30.0.0/16"]'
+  TF_VAR_admin_username: azureuser
+  TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  destroy:
+    name: Plan & Destroy
+    runs-on: ubuntu-latest
+    environment: production   # Сложи защита/approval в GitHub Environments (Settings → Environments)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Terraform setup
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Ако backend параметрите не са в code, подай ги тук с -backend-config
+      - name: Terraform Init
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform init -input=false
+
+      - name: Safety check (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "YES" ]; then
+            echo "Confirmation not provided. Aborting."; exit 1; fi
+
+      - name: Terraform Destroy Plan
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform plan -destroy -input=false -out=tfdestroy
+
+      - name: Show Destroy Plan
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform show -no-color tfdestroy > destroy-plan.txt
+
+      - name: Upload Destroy Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan
+          path: |
+            ${{ env.TF_ROOT }}/tfdestroy
+            ${{ env.TF_ROOT }}/destroy-plan.txt
+
+      # Тук реалното унищожение – разрешено е само след Environment approval
+      - name: Terraform Destroy Apply
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform apply -input=false tfdestroy
