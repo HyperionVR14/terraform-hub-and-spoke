@@ -52,7 +52,7 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_ROOT }}
-        run: terraform plan -input=false -out=tfplan -var-file terraform.auto.tfvars
+        run: terraform plan -input=false -out=tfplan -var-file="terraform.auto.tfvars"
 
       - name: Show Plan
         working-directory: ${{ env.TF_ROOT }}
