@@ -92,5 +92,5 @@ module "vm_hub" {
   name_prefix         = var.name_prefix
   subnet_id           = module.vnet_hub.subnet_id
   admin_username = var.admin_username
-  ssh_public_key = file(var.ssh_public_key_path)
+  ssh_public_key = file(var.ssh_public_key)
 }

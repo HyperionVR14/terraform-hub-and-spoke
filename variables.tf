@@ -41,7 +41,7 @@ type = string
 description = "VM admin username"
 }
 
-variable "ssh_public_key_path" { 
+variable "ssh_public_key" { 
 type = string 
 description = "SSH Key"    
 }
