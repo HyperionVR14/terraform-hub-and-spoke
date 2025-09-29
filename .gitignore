@@ -12,6 +12,7 @@ override.tf.json
 *_override.tf.json
 terraform.tfplan
 tfplan
+!terraform.auto.tfvars
 
 # OS / IDE
 .DS_Store
