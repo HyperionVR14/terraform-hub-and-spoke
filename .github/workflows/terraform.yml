@@ -40,7 +40,8 @@ jobs:
       - name: Terraform Init
         working-directory: ${{ env.TF_ROOT }}
         run: |
-          terraform init -input=false
+          terraform init -Upgrade -input=false
+          terraform init -upgrade -input=false
           # ако backend параметрите не са в repo (backend.tf), подай ги тук с -backend-config=...
 
     #  - name: Terraform Fmt - Commented because failing with error 3
