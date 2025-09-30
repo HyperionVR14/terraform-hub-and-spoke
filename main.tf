@@ -1,6 +1,9 @@
 resource "azurerm_resource_group" "rg" {
   name     = "${var.name_prefix}-rg"
   location = var.location
+    lifecycle {
+    prevent_destroy = var.allow_rg_destroy ? false : true
+  }
 }
 
 # --- Networks (Hub + Spokes) ---
