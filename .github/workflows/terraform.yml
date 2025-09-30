@@ -40,7 +40,6 @@ jobs:
       - name: Terraform Init
         working-directory: ${{ env.TF_ROOT }}
         run: |
-          terraform init -Upgrade -input=false
           terraform init -upgrade -input=false
           # ако backend параметрите не са в repo (backend.tf), подай ги тук с -backend-config=...
 
