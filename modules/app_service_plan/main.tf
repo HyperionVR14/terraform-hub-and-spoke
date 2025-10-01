@@ -21,10 +21,3 @@ resource "azurerm_service_plan" "this" {
   zone_balancing_enabled = var.zone_balancing_enabled
   tags                = var.tags
 }
-
-output "id" {
-  value = azurerm_service_plan.this.id
-}
-output "name" {
-  value = azurerm_service_plan.this.name
-}
