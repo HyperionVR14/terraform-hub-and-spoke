@@ -21,3 +21,6 @@ spoke2 = { name = module.vnet_spoke2.vnet_name, cidr = module.vnet_spoke2.addres
 output "storage_account_name" { value = module.storage.account_name }
 output "key_vault_name" { value = module.keyvault.kv_name }
 output "vm_private_ip" { value = module.vm_hub.private_ip }
+
+output "web_name"             { value = module.web_app.name }
+output "web_default_hostname" { value = module.web_app.default_hostname }

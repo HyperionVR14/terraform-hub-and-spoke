@@ -1,0 +1,17 @@
+<h1>Practical Exam Task: Deploy Azure Infrastructure Using Terraform and GitHub Actions</h1>
+<h2>Objective</h2>
+<p>Create and deploy a secure Azure infrastructure using Terraform, with automated provisioning via GitHub Actions. All resources must be hardened to prevent public access and operate strictly within a private network.</p>
+<h2>Scenario</h2>
+<p>You joined a DevOps team tasked with setting up a secure and scalable web application environment in Azure. Your goal is to provision the following resources using Terraform and automate the deployment pipeline using GitHub Actions. The infrastructure must follow best practices for security and network isolation.</p>
+<h2> Requirements</h2>
+<p><strong>1. Terraform Configuration</strong></p>
+<p>Write Terraform code to provision the above resources.Azure Resource GroupAzure Virtual NetworkAzure SubnetAzure Storage AccountAzure App Service PlanAzure Web App (with a sample HTML page)Use variables and outputs appropriately.Organize code using modules if possible.Security Hardening Requirements:All resources must be deployed inside a private virtual network.Disable public access to the Azure Storage Account (public_network_access = "Disabled").Ensure the Web App is integrated with a private subnet using VNet Integration.Use Private Endpoints for services where applicable.Avoid using public IP addresses.Restrict access using Network Security Groups (NSGs) to allow only internal traffic.Use Azure Key Vault to store secrets securely (optional bonus).</p>
+<p><strong>2. GitHub Repository</strong></p>
+<p>Setup Create a public or private GitHub repo named azure-iac-terraform.Include:main.tf, variables.tf, outputs.tf.github/workflows/deploy.yml for GitHub Actions</p>
+<p><strong>3. GitHub Actions Workflow</strong></p>
+<p>Automate Terraform deployment using GitHub Actions:Initialize TerraformValidate configurationPlan and apply changesUse GitHub Secrets for Azure credentials:ARM_CLIENT_IDARM_CLIENT_SECRETARM_SUBSCRIPTION_IDARM_TENANT_ID</p>
+<p><strong>4. Bonus Challenge (Optional)</strong></p>
+<p>Add a rollback mechanism using terraform destroy on a separate branch.Integrate a basic test to verify that the Web App is reachable only from within the private network.Use Azure Key Vault to manage sensitive configuration values.</p>
+<p><strong>Deliverables</strong></p>
+<p>GitHub repo link with all code and workflow files.A README.md explaining:Project structureHow to set up secretsHow to run the workflowExpected output</p>
+<p><strong>Evaluation Criteria - Hope for the best. :)</strong></p>

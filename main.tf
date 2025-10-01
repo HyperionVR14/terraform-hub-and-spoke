@@ -22,6 +22,7 @@ module "vnet_spoke1" {
   subnet_name         = "snet-spoke1"
 }
 
+
 module "vnet_spoke2" {
   source              = "./modules/network"
   name                = "${var.name_prefix}-spoke2-vnet"
@@ -94,3 +95,45 @@ module "vm_hub" {
   admin_username = var.admin_username
   ssh_public_key = var.ssh_public_key
 }
+module "app_service_plan" {
+  source              = "./modules/app_service_plan"
+  name                = "${var.name_prefix}-asp"
+  resource_group_name = azurerm_resource_group.rg.name  
+  location            = var.location
+
+  # За dev може B1; за по-сериозно – P1v3
+  sku_name                  = var.asp_sku_name   # напр. "B1" или "P1v3"
+  zone_balancing_enabled    = false
+
+}
+
+########################################
+# Web App (+ опционално VNet Integration и Private Endpoint)
+########################################
+module "web_app" {
+  source              = "./modules/web_app"
+  name                = "${var.name_prefix}-web"
+  resource_group_name = azurerm_resource_group.rg.name  
+  location            = var.location
+
+  app_service_plan_id = module.app_service_plan.id
+
+  # Outbound VNet Integration (делегирана подсмрежа Microsoft.Web/serverFarms)
+  #vnet_integration_subnet_id = var.snet_app_integration_id    # или null ако няма още
+
+  # Private Endpoint подсмрежа (НЕделегирана)
+  #private_endpoint_subnet_id = var.snet_private_endpoints_id   # или null за фаза 1
+
+  # Private DNS за privatelink.azurewebsites.net
+  create_private_dns = true
+  dns_link_vnet_ids  = [
+  ]
+
+  # Bootstrap: позволи публичен достъп за първоначален деплой на HTML
+  public_access_enabled = true  # фаза 1 → след това го правиш false (deny-all)
+
+  app_settings = {
+    "APP_ENV" = "dev"
+  }
+}
+#change

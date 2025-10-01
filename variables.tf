@@ -36,3 +36,7 @@ variable "allow_rg_destroy" {
   type    = bool
   default = false
 }
+variable "asp_sku_name" {
+  type    = string
+  default = "B1"
+}
