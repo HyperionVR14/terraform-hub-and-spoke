@@ -14,19 +14,115 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Когато заключиш приложението в private (PE + deny public), смени на 'true', за да се skip-нат публичните проверки
+  PRIVATE_MODE: 'false'
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      # Качва съдържанието от my-html-app/ към Azure Web App
+      # (По-лесен тракинг) Вкарай билд-маркер файл, който ще се качи заедно с HTML-а
+      - name: Create build marker
+        run: |
+          mkdir -p my-html-app
+          {
+            echo "repo=$GITHUB_REPOSITORY"
+            echo "commit=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > my-html-app/_buildinfo.txt
+
+      # Деплой на статичното съдържание
       - name: Deploy to Azure WebApp
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}                 # напр. secwebapp-web
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}                   # напр. hyperion-web
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # Publish Profile XML
           package: my-html-app
-          
-      - name: Show URL
-        run: echo "URL -> https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+
+      # Извадка на Kudu (SCM) креденшъли от publish profile, за да четем VFS (лист/файлове)
+      - name: Extract Kudu credentials
+        id: kudu
+        if: env.PRIVATE_MODE != 'true'
+        env:
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          xml = os.environ['PUBLISH_PROFILE']
+          root = ET.fromstring(xml)
+          user = pwd = scm = None
+          for p in root.findall(".//publishProfile[@publishMethod='MSDeploy']"):
+              user = p.attrib.get('userName')
+              pwd  = p.attrib.get('userPWD')
+              url  = p.attrib.get('publishUrl')  # e.g. hyperion-web.scm.azurewebsites.net:443
+              scm  = f"https://{url.split(':')[0]}"
+              break
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"user={user}\n")
+              f.write(f"pass={pwd}\n")
+              f.write(f"scm={scm}\n")
+          PY
+
+      # Smoke 1: изчакай до 200 OK (ретрай), за да поеме след деплоя
+      - name: Smoke - Wait for 200 OK
+        if: env.PRIVATE_MODE != 'true'
+        shell: bash
+        run: |
+          URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/"
+          echo "Probing $URL ..."
+          for i in {1..20}; do
+            code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$URL" || true)
+            echo "Attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Site is up."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Site did not return 200 within the timeout."
+          exit 1
+
+      # Smoke 2: провери съдържанието (ключова фраза или билд-маркер)
+      - name: Smoke - Check content
+        if: env.PRIVATE_MODE != 'true'
+        shell: bash
+        run: |
+          URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/"
+          body=$(curl -sS "$URL")
+          # Първо търсим "It works", ако ползваш друга страница—маркерът ще ни спаси
+          if echo "$body" | grep -qi "It works"; then
+            echo "Found 'It works' marker."
+            exit 0
+          fi
+          # fallback: билд-маркер
+          info=$(curl -sS "${URL}_buildinfo.txt" || true)
+          echo "$info"
+          echo "$info" | grep -q "$GITHUB_SHA" || { echo "Build marker not found in _buildinfo.txt"; exit 1; }
+          echo "Build marker OK."
+
+      # Smoke 3: провери през Kudu (SCM) VFS, че index.html е качен и достъпен
+      - name: Smoke - Kudu VFS index.html
+        if: env.PRIVATE_MODE != 'true'
+        shell: bash
+        run: |
+          curl -sS -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            "${{ steps.kudu.outputs.scm }}/api/vfs/site/wwwroot/index.html" -I | tee /tmp/headers.txt
+          grep -q "^HTTP/.* 200" /tmp/headers.txt || { echo "index.html not found via Kudu VFS"; exit 1; }
+          echo "Kudu VFS index.html OK."
+
+      # Smoke 4: провери билд-маркера през Kudu (точно кой билд се е качил)
+      - name: Smoke - Kudu VFS _buildinfo.txt
+        if: env.PRIVATE_MODE != 'true'
+        shell: bash
+        run: |
+          content=$(curl -sS -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            "${{ steps.kudu.outputs.scm }}/api/vfs/site/wwwroot/_buildinfo.txt" || true)
+          echo "$content"
+          echo "$content" | grep -q "$GITHUB_SHA" || { echo "_buildinfo.txt missing or SHA mismatch"; exit 1; }
+          echo "Kudu VFS buildinfo OK."
