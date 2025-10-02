@@ -1,0 +1,32 @@
+name: Deploy Web Content (HTML)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'my-html-app/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: webapp-content
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Качва съдържанието от my-html-app/ към Azure Web App
+      - name: Deploy to Azure WebApp
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}                 # напр. secwebapp-web
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # Publish Profile XML
+          package: my-html-app
+          
+      - name: Show URL
+        run: echo "URL -> https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
