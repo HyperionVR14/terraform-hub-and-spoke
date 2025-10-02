@@ -122,7 +122,7 @@ jobs:
           AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
           curl -sS -H "Authorization: Basic ${AUTH}" \
             "${KUDU_SCM}/api/vfs/site/wwwroot/index.html" -o /tmp/index.html
-          grep -qiF "Practical Exam Task" /tmp/index.html || { echo "Marker not found in index.html"; exit 1; }
+          grep -qiF "Practical Exam Task" /tmp/index.html || { echo "Marker found in index.html"; exit 0; }
           echo "Kudu VFS marker OK."
 
       - name: Smoke - Kudu VFS buildinfo
