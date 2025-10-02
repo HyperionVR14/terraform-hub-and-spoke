@@ -101,15 +101,13 @@ module "app_service_plan" {
   resource_group_name = azurerm_resource_group.rg.name  
   location            = var.location
 
-  # За dev може B1; за по-сериозно – P1v3
-  sku_name                  = var.asp_sku_name   # напр. "B1" или "P1v3"
+  sku_name                  = var.asp_sku_name 
   zone_balancing_enabled    = false
 
 }
 
-########################################
-# Web App (+ опционално VNet Integration и Private Endpoint)
-########################################
+
+# Web App 
 module "web_app" {
   source              = "./modules/web_app"
   name                = "${var.name_prefix}-web"
@@ -118,19 +116,16 @@ module "web_app" {
 
   app_service_plan_id = module.app_service_plan.id
 
-  # Outbound VNet Integration (делегирана подсмрежа Microsoft.Web/serverFarms)
-  #vnet_integration_subnet_id = var.snet_app_integration_id    # или null ако няма още
-
-  # Private Endpoint подсмрежа (НЕделегирана)
-  #private_endpoint_subnet_id = var.snet_private_endpoints_id   # или null за фаза 1
+  vnet_integration_subnet_id = var.webapp_private_mode ? module.network.snet_app_id : null
+  private_endpoint_subnet_id = var.webapp_private_mode ? module.network.snet_pe_id  : null
 
   # Private DNS за privatelink.azurewebsites.net
-  create_private_dns = true
-  dns_link_vnet_ids  = [
-  ]
+  create_private_dns        = false
+  private_dns_zone_ids_app  = var.webapp_private_mode ? [module.privatedns.webapps_zone_id] : []
 
-  # Bootstrap: позволи публичен достъп за първоначален деплой на HTML
-  public_access_enabled = true  # фаза 1 → след това го правиш false (deny-all)
+
+  # Bootstrap: Allow public access for initial deployment of HTML
+  public_access_enabled = var.webapp_private_mode ? false : true
 
   app_settings = {
     "APP_ENV" = "dev"

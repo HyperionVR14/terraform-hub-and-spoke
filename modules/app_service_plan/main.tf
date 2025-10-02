@@ -17,7 +17,7 @@ resource "azurerm_service_plan" "this" {
   resource_group_name = var.resource_group_name
   location            = var.location
   os_type             = "Linux"
-  sku_name            = var.sku_name   # напр. "P1v3" или "B1" за тест
+  sku_name            = var.sku_name
   zone_balancing_enabled = var.zone_balancing_enabled
   tags                = var.tags
 }

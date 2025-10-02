@@ -17,4 +17,4 @@ variable "ssh_public_key"      { type = string }
 #  description = "Manual override for temp unlock (particular string in sdefined in the root)."
 #  type        = string
 #  default     = ""
-#}
+#}    work in progress here :D 

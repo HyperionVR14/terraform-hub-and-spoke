@@ -18,9 +18,7 @@ env:
   ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  # Подай нужните TF_VAR_* (или използвай tfvars във репото)
   TF_VAR_allow_rg_destroy: "true"
-  # Примерни входове – адаптирай за твоя проект:
   TF_VAR_location: northeurope
   TF_VAR_name_prefix: demo
   TF_VAR_hub_address_space: '["10.10.0.0/16"]'
@@ -38,7 +36,7 @@ jobs:
   destroy:
     name: Plan & Destroy
     runs-on: ubuntu-latest
-    environment: production   # Сложи защита/approval в GitHub Environments (Settings → Environments)
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +52,6 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      # Ако backend параметрите не са в code, подай ги тук с -backend-config
       - name: Terraform Init
         working-directory: ${{ env.TF_ROOT }}
         run: terraform init -input=false
@@ -81,7 +78,7 @@ jobs:
             ${{ env.TF_ROOT }}/tfdestroy
             ${{ env.TF_ROOT }}/destroy-plan.txt
 
-      # Тук реалното унищожение – разрешено е само след Environment approval
+      # Allow destruction only after Environment approval
       - name: Terraform Destroy Apply
         working-directory: ${{ env.TF_ROOT }}
         run: terraform apply -input=false tfdestroy

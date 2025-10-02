@@ -40,3 +40,7 @@ variable "asp_sku_name" {
   type    = string
   default = "B1"
 }
+variable "webapp_private_mode" {
+  type    = bool
+  default = false
+}

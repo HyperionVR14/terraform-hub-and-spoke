@@ -1,0 +1,174 @@
+name: Rollback WebApp to Public (Disable Private Lockdown)
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: rollback-webapp-public
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_IN_AUTOMATION: true
+  PRIVATE_MODE: 'false'
+  ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  rollback:
+    name: Rollback (Terraform apply to public + smoke checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -reconfigure
+
+      # Setting private mode flag to OFF (public/bootstrap mode)
+      - name: Terraform Plan (public mode)
+        env:
+          TF_VAR_webapp_private_mode: "false"
+        run: terraform plan -out tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Export TF outputs
+        id: tfout
+        run: |
+          echo "RG=$(terraform output -raw rg_name)"   >> $GITHUB_OUTPUT
+          echo "APP=$(terraform output -raw web_name)" >> $GITHUB_OUTPUT
+
+      - name: Azure CLI login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id:       ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      - name: Ensure VNet Integration is removed
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          az extension add -n webapp --only-show-errors || true
+          list=$(az webapp vnet-integration list -g "$RG" -n "$APP" -o json || echo "[]")
+          echo "$list" | jq .
+          cnt=$(echo "$list" | jq 'length')
+          [ "$cnt" -eq 0 ] || { echo "VNet Integration still present"; exit 1; }
+          echo "VNet Integration removed "
+
+      - name: Ensure no Private Endpoints reference this Web App
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
+          pe_json=$(az network private-endpoint list -g "$RG" -o json)
+          ref_cnt=$(echo "$pe_json" | jq --arg id "$APP_ID" '[ .[] | select(any(.privateLinkServiceConnections[]?; .privateLinkServiceId==$id)) ] | length')
+          echo "PEs referencing app: $ref_cnt"
+          [ "$ref_cnt" -eq 0 ] || { echo "Private Endpoints still reference the app"; exit 1; }
+          echo "No Private Endpoints referencing Web App "
+
+      - name: Ensure no deny-all access restriction
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          ar=$(az webapp config access-restriction show -g "$RG" -n "$APP" -o json || echo "{}")
+          echo "$ar" | jq .
+          deny_all=$(echo "$ar" | jq -r '.ipSecurityRestrictions[]? | select(.action=="Deny" and .ipAddress=="0.0.0.0/0") | .name' | head -n1)
+          if [ -n "$deny_all" ]; then
+            echo "Deny-all rule still present: $deny_all"
+            exit 1
+          fi
+          echo "No deny-all restriction "
+
+      # Public smoke tests
+      - name: Smoke - Wait for 200 OK (public)
+        shell: bash
+        env:
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          URL="https://${APP}.azurewebsites.net/"
+          echo "Probing $URL ..."
+          for i in {1..20}; do
+            code=$(curl -k -sS -L -o /dev/null -w "%{http_code}" "$URL" || true)
+            echo "Attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "Public URL did not return 200 within timeout"
+          exit 1
+
+      - name: Smoke - Check homepage content marker (optional)
+        shell: bash
+        env:
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          URL="https://${APP}.azurewebsites.net/"
+          code=$(curl -k -sS -L -o /tmp/body.html -w "%{http_code}" "$URL" || true)
+          echo "HTTP $code"; head -c 400 /tmp/body.html || true; echo
+          # Смени/разшири маркера според реалното съдържание:
+          if grep -qiE "Practical Exam Task|It works|Hyperion" /tmp/body.html; then
+            echo "Homepage marker OK "
+            exit 0
+          fi
+          echo "Marker not found (not fatal)."
+          exit 0
+
+      # Kudu VFS checks 
+      - name: Extract Kudu credentials
+        id: kudu
+        env:
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          xml = os.environ['PUBLISH_PROFILE']
+          root = ET.fromstring(xml)
+          user = pwd = scm = None
+          for p in root.findall(".//publishProfile[@publishMethod='MSDeploy']"):
+              user = p.attrib.get('userName')
+              pwd  = p.attrib.get('userPWD')
+              url  = p.attrib.get('publishUrl')  # e.g. appname.scm.azurewebsites.net:443
+              scm  = f"https://{url.split(':')[0]}"
+              break
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              if user: f.write(f"user={user}\n")
+              if pwd:  f.write(f"pass={pwd}\n")
+              if scm:  f.write(f"scm={scm}\n")
+          PY
+
+      - name: Smoke - Kudu VFS index.html (GET)
+        shell: bash
+        env:
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
+        run: |
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64 -w0 2>/dev/null || python3 - <<'PY'
+          import os,base64;print(base64.b64encode(f"{os.environ['KUDU_USER']}:{os.environ['KUDU_PASS']}".encode()).decode(),end="")
+          PY
+          )
+          URL="${KUDU_SCM}/api/vfs/site/wwwroot/index.html"
+          code=$(curl --http1.1 -sS -L -D /tmp/headers.txt -o /tmp/index.html -w "%{http_code}" -H "Authorization: Basic ${AUTH}" "$URL" || true)
+          echo "HTTP $code"; echo "---- headers ----"; cat /tmp/headers.txt || true
+          [ "$code" = "200" ] || { echo "index.html not accessible via Kudu VFS"; exit 1; }
+          echo "Kudu VFS index.html OK "
+
+      - name: Done
+        run: "echo Rollback to Public: SUCCESS "

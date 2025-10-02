@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  PRIVATE_MODE: 'false'   # промени на 'true' когато заключиш достъпа (PE + deny public)
+  PRIVATE_MODE: 'false'   #it is false for the deploy to be easier
 
 jobs:
   deploy:
@@ -41,7 +41,7 @@ jobs:
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: my-html-app
 
-      # Kudu creds (за VFS проверки)
+      # Kudu creds (for VFS checks)
       - name: Extract Kudu credentials
         id: kudu
         if: env.PRIVATE_MODE != 'true'
@@ -66,7 +66,7 @@ jobs:
               f.write(f"scm={scm}\n")
           PY
 
-      # Smoke 1: изчакай 200 OK на началната страница
+      # Smoke 1: waiting for 200 on first page
       - name: Smoke - Wait for 200 OK
         if: env.PRIVATE_MODE != 'true'
         shell: bash
@@ -81,7 +81,7 @@ jobs:
           echo "Site did not return 200 within the timeout."
           exit 1
 
-      # Smoke 2: провери съдържанието на началната страница
+      # Smoke 2: Checking content of the page for "Practical Exam.."
       - name: Smoke - Check homepage content
         if: env.PRIVATE_MODE != 'true'
         shell: bash
@@ -99,11 +99,11 @@ jobs:
           KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          # Генерираме Basic header без нов ред
+          # Generating Basic header without new line
           AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64 -w0 2>/dev/null || python3 -c "import sys,base64;print(base64.b64encode(sys.stdin.buffer.read()).decode())")
           URL="${KUDU_SCM}/api/vfs/site/wwwroot/index.html"
       
-          # Вземаме файла с GET (не HEAD), форсираме http/1.1 за надеждност
+          # Getting the file with GET, forcing http/1.1 for stability
           code=$(curl --http1.1 -sS -L -D /tmp/headers.txt -o /tmp/index.html \
                  -w "%{http_code}" -H "Authorization: Basic ${AUTH}" "$URL" || true)
       
@@ -119,14 +119,14 @@ jobs:
           KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          # Генерирай Authorization без нов ред (някои шелове добавят \n по подразбиране)
+          # Generating Authorization without \n by default, otherwise challenges :D)
           AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64 -w0 2>/dev/null || python3 - <<'PY'
           import os, base64; print(base64.b64encode(f"{os.environ['KUDU_USER']}:{os.environ['KUDU_PASS']}".encode()).decode(), end="")
           PY
           )
               URL="${KUDU_SCM}/api/vfs/site/wwwroot/_buildinfo.txt"
       
-          # Вземи С ФАЙЛ (GET), не HEAD, и провери HTTP кода
+          # Getting the file with GET, and checking code
           code=$(curl --http1.1 -sS -L -D /tmp/headers.txt -o /tmp/_buildinfo.txt \
                  -w "%{http_code}" -H "Authorization: Basic ${AUTH}" "$URL" || true)
       
@@ -136,9 +136,8 @@ jobs:
           echo "---- _buildinfo.txt ----"
           head -n 20 /tmp/_buildinfo.txt || true
       
-          [ "$code" = "200" ] || { echo "Kudu VFS returned $code (не е 200)"; exit 1; }
+          [ "$code" = "200" ] || { echo "Kudu VFS returned $code (not 200)"; exit 1; }
       
-          # По-устойчиво: позволи match по пълния SHA ИЛИ по първите 7 символа
           if grep -q "commit=${GITHUB_SHA}" /tmp/_buildinfo.txt; then
             echo "Exact SHA match OK."
           else

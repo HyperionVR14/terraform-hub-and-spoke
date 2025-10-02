@@ -1,0 +1,117 @@
+name: Finalize WebApp Private Lockdown
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: finalize-private-lockdown
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PRIVATE_MODE: 'true'
+  TF_IN_AUTOMATION: true
+  ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  finalize:
+    name: Lockdown (Terraform apply + infra smoke checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -reconfigure
+
+      # Enabling private mode
+      - name: Terraform Plan (private mode)
+        env:
+          TF_VAR_webapp_private_mode: "true"
+        run: terraform plan -out tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Export TF outputs
+        id: tfout
+        run: |
+          echo "RG=$(terraform output -raw rg_name)"          >> $GITHUB_OUTPUT
+          echo "APP=$(terraform output -raw web_name)"        >> $GITHUB_OUTPUT
+
+      # Azure CLI login
+      - name: Azure CLI login
+        uses: azure/login@v2
+        with:
+          client-id:     ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id:     ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      # Check VNet Integration is enabled and pointing towards subnet
+      - name: Smoke - WebApp VNet Integration present
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          az extension add -n webapp --only-show-errors || true
+          info=$(az webapp vnet-integration list -g "$RG" -n "$APP" --query "[0]" -o json || echo "{}")
+          echo "$info" | jq .
+          subnetId=$(echo "$info" | jq -r '.virtualNetworkSubnetId // empty')
+          [ -n "$subnetId" ] || { echo "VNet Integration missing"; exit 1; }
+          echo "VNet Integration OK -> $subnetId"
+
+      # Check Private Endpoint towards WebApp (sites) is created and Succeeded
+      - name: Smoke - Private Endpoint exists (sites)
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          pe=$(az network private-endpoint list -g "$RG" --query "[?contains(name, '${APP}')]" -o json)
+          echo "$pe" | jq '.[].{name:name,state:provisioningState,subnet:subnet.id}'
+          cnt=$(echo "$pe" | jq 'length')
+          [ "$cnt" -ge 1 ] || { echo "No Private Endpoints found for $APP"; exit 1; }
+          # Ensuring that at least one PE is succeded
+          ok=$(echo "$pe" | jq '[.[] | select(.provisioningState=="Succeeded")] | length')
+          [ "$ok" -ge 1 ] || { echo "Private Endpoint not in Succeeded state"; exit 1; }
+          echo "Private Endpoint OK"
+
+      # Check Private DNS record in privatelink.azurewebsites.net
+      - name: Smoke - Private DNS A record exists
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          rs=$(az network private-dns record-set a show -g "$RG" -z "privatelink.azurewebsites.net" -n "$APP" -o json || echo "{}")
+          echo "$rs" | jq .
+          ips=$(echo "$rs" | jq -r '.arecords[].ipv4Address' 2>/dev/null || true)
+          [ -n "$ips" ] || { echo "No A records for $APP in privatelink.azurewebsites.net"; exit 1; }
+          echo "Private DNS OK -> $ips"
+
+      # Check if the public access is restricted (deny-all rule persists)
+      - name: Smoke - Access Restrictions deny-all
+        shell: bash
+        env:
+          RG:  ${{ steps.tfout.outputs.RG }}
+          APP: ${{ steps.tfout.outputs.APP }}
+        run: |
+          ar=$(az webapp config access-restriction show -g "$RG" -n "$APP" -o json || echo "{}")
+          echo "$ar" | jq .
+          # serching deny to 0.0.0.0/0 (our IP restriction in Terraform)
+          deny=$(echo "$ar" | jq -r '.ipSecurityRestrictions[]? | select(.action=="Deny" and (.ipAddress=="0.0.0.0/0" or .vnetSubnetResourceId!=null)) | .name' | head -n1)
+          [ -n "$deny" ] || { echo "No deny-all access restriction found"; exit 1; }
+          echo "Access Restriction OK -> $deny"
+
+      - name: Done
+        run: "echo Finalize Lockdown: SUCCESS "

@@ -1,6 +1,6 @@
 variable "enable_rg_delete_lock" {
   type    = bool
-  default = true  # по подразбиране защитено
+  default = true  # by default to be protected
 }
 
 resource "azurerm_management_lock" "rg_delete_lock" {
