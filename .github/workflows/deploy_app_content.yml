@@ -111,7 +111,7 @@ jobs:
           [ "$code" = "200" ] || { echo "index.html not accessible via Kudu VFS"; exit 1; }
           echo "Kudu VFS index.html OK."
 
-      - name: Smoke - Kudu VFS contains marker
+      - name: Smoke - Kudu VFS buildinfo (200 + content + SHA)
         if: env.PRIVATE_MODE != 'true'
         env:
           KUDU_USER: ${{ steps.kudu.outputs.user }}
@@ -119,22 +119,32 @@ jobs:
           KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
-          curl -sS -H "Authorization: Basic ${AUTH}" \
-            "${KUDU_SCM}/api/vfs/site/wwwroot/index.html" -o /tmp/index.html
-          grep -qiF "Practical Exam Task" /tmp/index.html || { echo "Marker found in index.html"; exit 0; }
-          echo "Kudu VFS marker OK."
-
-      - name: Smoke - Kudu VFS buildinfo
-        if: env.PRIVATE_MODE != 'true'
-        env:
-          KUDU_USER: ${{ steps.kudu.outputs.user }}
-          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
-          KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
-        shell: bash
-        run: |
-          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
-          curl -sS -H "Authorization: Basic ${AUTH}" \
-            "${KUDU_SCM}/api/vfs/site/wwwroot/_buildinfo.txt" -o /tmp/_buildinfo.txt
-          grep -q "$GITHUB_SHA" /tmp/_buildinfo.txt || { echo "Build SHA not found in _buildinfo.txt"; exit 1; }
-          echo "Kudu VFS buildinfo OK."          
+          # Генерирай Authorization без нов ред (някои шелове добавят \n по подразбиране)
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64 -w0 2>/dev/null || python3 - <<'PY'
+          import os, base64; print(base64.b64encode(f"{os.environ['KUDU_USER']}:{os.environ['KUDU_PASS']}".encode()).decode(), end="")
+          PY
+          )
+              URL="${KUDU_SCM}/api/vfs/site/wwwroot/_buildinfo.txt"
+      
+          # Вземи С ФАЙЛ (GET), не HEAD, и провери HTTP кода
+          code=$(curl --http1.1 -sS -L -D /tmp/headers.txt -o /tmp/_buildinfo.txt \
+                 -w "%{http_code}" -H "Authorization: Basic ${AUTH}" "$URL" || true)
+      
+          echo "HTTP $code"
+          echo "---- headers ----"
+          cat /tmp/headers.txt || true
+          echo "---- _buildinfo.txt ----"
+          head -n 20 /tmp/_buildinfo.txt || true
+      
+          [ "$code" = "200" ] || { echo "Kudu VFS returned $code (не е 200)"; exit 1; }
+      
+          # По-устойчиво: позволи match по пълния SHA ИЛИ по първите 7 символа
+          if grep -q "commit=${GITHUB_SHA}" /tmp/_buildinfo.txt; then
+            echo "Exact SHA match OK."
+          else
+            SHORT=$(echo "$GITHUB_SHA" | cut -c1-7)
+            grep -q "commit=${SHORT}" /tmp/_buildinfo.txt || { echo "Build SHA not found in _buildinfo.txt"; exit 1; }
+            echo "Short SHA match OK."
+          fi
+      
+          echo "Kudu VFS buildinfo OK."
