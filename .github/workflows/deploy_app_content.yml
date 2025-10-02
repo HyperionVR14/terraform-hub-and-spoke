@@ -91,7 +91,7 @@ jobs:
           echo "$body" | grep -qi "Practical Exam Task" || { echo "Homepage marker not found"; exit 0; }
           echo "Homepage content OK."
 
-      - name: Smoke - Kudu VFS index.html
+      - name: Smoke - Kudu VFS index.html (GET)
         if: env.PRIVATE_MODE != 'true'
         env:
           KUDU_USER: ${{ steps.kudu.outputs.user }}
@@ -99,10 +99,16 @@ jobs:
           KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
-          curl -sS -H "Authorization: Basic ${AUTH}" \
-            "${KUDU_SCM}/api/vfs/site/wwwroot/index.html" -I | tee /tmp/headers.txt
-          grep -q "^HTTP/.* 200" /tmp/headers.txt || { echo "index.html not found via Kudu VFS"; exit 1; }
+          # Генерираме Basic header без нов ред
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64 -w0 2>/dev/null || python3 -c "import sys,base64;print(base64.b64encode(sys.stdin.buffer.read()).decode())")
+          URL="${KUDU_SCM}/api/vfs/site/wwwroot/index.html"
+      
+          # Вземаме файла с GET (не HEAD), форсираме http/1.1 за надеждност
+          code=$(curl --http1.1 -sS -L -D /tmp/headers.txt -o /tmp/index.html \
+                 -w "%{http_code}" -H "Authorization: Basic ${AUTH}" "$URL" || true)
+      
+          echo "HTTP $code"; echo "---- headers ----"; cat /tmp/headers.txt
+          [ "$code" = "200" ] || { echo "index.html not accessible via Kudu VFS"; exit 1; }
           echo "Kudu VFS index.html OK."
 
       - name: Smoke - Kudu VFS contains marker
