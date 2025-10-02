@@ -105,13 +105,30 @@ jobs:
           grep -q "^HTTP/.* 200" /tmp/headers.txt || { echo "index.html not found via Kudu VFS"; exit 1; }
           echo "Kudu VFS index.html OK."
 
-      # Smoke 4: провери билд-маркера през Kudu (а не през публичния сайт)
-      - name: Smoke - Kudu VFS _buildinfo.txt
+      - name: Smoke - Kudu VFS contains marker
         if: env.PRIVATE_MODE != 'true'
+        env:
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          content=$(curl -sS -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
-            "${{ steps.kudu.outputs.scm }}/api/vfs/site/wwwroot/_buildinfo.txt" || true)
-          echo "$content"
-          echo "$content" | grep -q "$GITHUB_SHA" || { echo "_buildinfo.txt missing or SHA mismatch"; exit 1; }
-          echo "Kudu VFS buildinfo OK."
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
+          curl -sS -H "Authorization: Basic ${AUTH}" \
+            "${KUDU_SCM}/api/vfs/site/wwwroot/index.html" -o /tmp/index.html
+          grep -qiF "Practical Exam Task" /tmp/index.html || { echo "Marker not found in index.html"; exit 1; }
+          echo "Kudu VFS marker OK."
+
+      - name: Smoke - Kudu VFS buildinfo
+        if: env.PRIVATE_MODE != 'true'
+        env:
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
+        shell: bash
+        run: |
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
+          curl -sS -H "Authorization: Basic ${AUTH}" \
+            "${KUDU_SCM}/api/vfs/site/wwwroot/_buildinfo.txt" -o /tmp/_buildinfo.txt
+          grep -q "$GITHUB_SHA" /tmp/_buildinfo.txt || { echo "Build SHA not found in _buildinfo.txt"; exit 1; }
+          echo "Kudu VFS buildinfo OK."          
