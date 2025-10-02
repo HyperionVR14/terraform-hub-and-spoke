@@ -9,6 +9,7 @@ resource "azurerm_linux_web_app" "this" {
 
   site_config {
     ftps_state = "Disabled"
+    app_command_line = "pm2 serve /home/site/wwwroot --no-daemon"
 
     application_stack {
       node_version = "20-lts"
