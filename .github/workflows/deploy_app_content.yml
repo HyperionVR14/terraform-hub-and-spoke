@@ -91,13 +91,17 @@ jobs:
           echo "$body" | grep -qi "Practical Exam Task" || { echo "Homepage marker not found"; exit 0; }
           echo "Homepage content OK."
 
-      # Smoke 3: провери, че index.html е качен (Kudu VFS)
       - name: Smoke - Kudu VFS index.html
         if: env.PRIVATE_MODE != 'true'
+        env:
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          KUDU_SCM:  ${{ steps.kudu.outputs.scm }}
         shell: bash
         run: |
-          curl -sS -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
-            "${{ steps.kudu.outputs.scm }}/api/vfs/site/wwwroot/index.html" -I | tee /tmp/headers.txt
+          AUTH=$(printf '%s' "${KUDU_USER}:${KUDU_PASS}" | base64)
+          curl -sS -H "Authorization: Basic ${AUTH}" \
+            "${KUDU_SCM}/api/vfs/site/wwwroot/index.html" -I | tee /tmp/headers.txt
           grep -q "^HTTP/.* 200" /tmp/headers.txt || { echo "index.html not found via Kudu VFS"; exit 1; }
           echo "Kudu VFS index.html OK."
 
